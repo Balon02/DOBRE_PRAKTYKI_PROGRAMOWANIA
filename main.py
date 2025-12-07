@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import csv
 from pathlib import Path
-from typing import Callable, Iterable, Iterator, List, Optional
+from typing import Callable, Iterable, Iterator, List, Optional, Type
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException, status
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import Column, Float, Integer, String, create_engine
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
@@ -72,14 +72,50 @@ class MovieResponse(ORMModel):
     genres: str
 
 
+class MovieCreate(BaseModel):
+    movieId: int
+    title: str
+    genres: str
+
+
+class MovieUpdate(BaseModel):
+    title: str
+    genres: str
+
+
 class LinkResponse(ORMModel):
     movieId: int
     imdbId: Optional[str] = None
     tmdbId: Optional[str] = None
 
 
+class LinkCreate(BaseModel):
+    movieId: int
+    imdbId: Optional[str] = None
+    tmdbId: Optional[str] = None
+
+
+class LinkUpdate(BaseModel):
+    imdbId: Optional[str] = None
+    tmdbId: Optional[str] = None
+
+
 class RatingResponse(ORMModel):
     id: int
+    userId: int
+    movieId: int
+    rating: float
+    timestamp: int
+
+
+class RatingCreate(BaseModel):
+    userId: int
+    movieId: int
+    rating: float
+    timestamp: int
+
+
+class RatingUpdate(BaseModel):
     userId: int
     movieId: int
     rating: float
@@ -94,12 +130,35 @@ class TagResponse(ORMModel):
     timestamp: int
 
 
+class TagCreate(BaseModel):
+    userId: int
+    movieId: int
+    tag: Optional[str] = None
+    timestamp: int
+
+
+class TagUpdate(BaseModel):
+    userId: int
+    movieId: int
+    tag: Optional[str] = None
+    timestamp: int
+
+
 def get_db() -> Iterator[Session]:
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
+
+
+def _get_or_404(
+    db: Session, model: Type[Base], pk: int, message: str
+) -> Base:
+    instance = db.get(model, pk)
+    if instance is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=message)
+    return instance
 
 
 def _optional_int(value: Optional[str]) -> Optional[int]:
@@ -206,9 +265,83 @@ def get_movies(db: Session = Depends(get_db)) -> List[Movie]:
     return db.query(Movie).all()
 
 
+@app.post("/movies", response_model=MovieResponse, status_code=status.HTTP_201_CREATED)
+def create_movie(movie: MovieCreate, db: Session = Depends(get_db)) -> Movie:
+    if db.get(Movie, movie.movieId):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Movie already exists"
+        )
+    new_movie = Movie(**movie.model_dump())
+    db.add(new_movie)
+    db.commit()
+    db.refresh(new_movie)
+    return new_movie
+
+
+@app.get("/movies/{movie_id}", response_model=MovieResponse)
+def get_movie(movie_id: int, db: Session = Depends(get_db)) -> Movie:
+    return _get_or_404(db, Movie, movie_id, "Movie not found")
+
+
+@app.put("/movies/{movie_id}", response_model=MovieResponse)
+def update_movie(
+    movie_id: int, movie_update: MovieUpdate, db: Session = Depends(get_db)
+) -> Movie:
+    movie = _get_or_404(db, Movie, movie_id, "Movie not found")
+    movie.title = movie_update.title
+    movie.genres = movie_update.genres
+    db.commit()
+    db.refresh(movie)
+    return movie
+
+
+@app.delete("/movies/{movie_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_movie(movie_id: int, db: Session = Depends(get_db)) -> None:
+    movie = _get_or_404(db, Movie, movie_id, "Movie not found")
+    db.delete(movie)
+    db.commit()
+
+
 @app.get("/links", response_model=List[LinkResponse])
 def get_links(db: Session = Depends(get_db)) -> List[Link]:
     return db.query(Link).all()
+
+
+@app.post("/links", response_model=LinkResponse, status_code=status.HTTP_201_CREATED)
+def create_link(link: LinkCreate, db: Session = Depends(get_db)) -> Link:
+    if db.get(Link, link.movieId):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Link already exists"
+        )
+    new_link = Link(**link.model_dump())
+    db.add(new_link)
+    db.commit()
+    db.refresh(new_link)
+    return new_link
+
+
+@app.get("/links/{movie_id}", response_model=LinkResponse)
+def get_link(movie_id: int, db: Session = Depends(get_db)) -> Link:
+    return _get_or_404(db, Link, movie_id, "Link not found")
+
+
+@app.put("/links/{movie_id}", response_model=LinkResponse)
+def update_link(
+    movie_id: int, link_update: LinkUpdate, db: Session = Depends(get_db)
+) -> Link:
+    link = _get_or_404(db, Link, movie_id, "Link not found")
+    link.imdbId = link_update.imdbId
+    link.tmdbId = link_update.tmdbId
+    db.commit()
+    db.refresh(link)
+    return link
+
+
+@app.delete("/links/{movie_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_link(movie_id: int, db: Session = Depends(get_db)) -> None:
+    link = _get_or_404(db, Link, movie_id, "Link not found")
+    db.delete(link)
+    db.commit()
 
 
 @app.get("/ratings", response_model=List[RatingResponse])
@@ -216,9 +349,81 @@ def get_ratings(db: Session = Depends(get_db)) -> List[Rating]:
     return db.query(Rating).all()
 
 
+@app.post(
+    "/ratings", response_model=RatingResponse, status_code=status.HTTP_201_CREATED
+)
+def create_rating(rating: RatingCreate, db: Session = Depends(get_db)) -> Rating:
+    new_rating = Rating(**rating.model_dump())
+    db.add(new_rating)
+    db.commit()
+    db.refresh(new_rating)
+    return new_rating
+
+
+@app.get("/ratings/{rating_id}", response_model=RatingResponse)
+def get_rating(rating_id: int, db: Session = Depends(get_db)) -> Rating:
+    return _get_or_404(db, Rating, rating_id, "Rating not found")
+
+
+@app.put("/ratings/{rating_id}", response_model=RatingResponse)
+def update_rating(
+    rating_id: int, rating_update: RatingUpdate, db: Session = Depends(get_db)
+) -> Rating:
+    rating_obj = _get_or_404(db, Rating, rating_id, "Rating not found")
+    rating_obj.userId = rating_update.userId
+    rating_obj.movieId = rating_update.movieId
+    rating_obj.rating = rating_update.rating
+    rating_obj.timestamp = rating_update.timestamp
+    db.commit()
+    db.refresh(rating_obj)
+    return rating_obj
+
+
+@app.delete("/ratings/{rating_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_rating(rating_id: int, db: Session = Depends(get_db)) -> None:
+    rating_obj = _get_or_404(db, Rating, rating_id, "Rating not found")
+    db.delete(rating_obj)
+    db.commit()
+
+
 @app.get("/tags", response_model=List[TagResponse])
 def get_tags(db: Session = Depends(get_db)) -> List[Tag]:
     return db.query(Tag).all()
+
+
+@app.post("/tags", response_model=TagResponse, status_code=status.HTTP_201_CREATED)
+def create_tag(tag: TagCreate, db: Session = Depends(get_db)) -> Tag:
+    new_tag = Tag(**tag.model_dump())
+    db.add(new_tag)
+    db.commit()
+    db.refresh(new_tag)
+    return new_tag
+
+
+@app.get("/tags/{tag_id}", response_model=TagResponse)
+def get_tag(tag_id: int, db: Session = Depends(get_db)) -> Tag:
+    return _get_or_404(db, Tag, tag_id, "Tag not found")
+
+
+@app.put("/tags/{tag_id}", response_model=TagResponse)
+def update_tag(
+    tag_id: int, tag_update: TagUpdate, db: Session = Depends(get_db)
+) -> Tag:
+    tag_obj = _get_or_404(db, Tag, tag_id, "Tag not found")
+    tag_obj.userId = tag_update.userId
+    tag_obj.movieId = tag_update.movieId
+    tag_obj.tag = tag_update.tag
+    tag_obj.timestamp = tag_update.timestamp
+    db.commit()
+    db.refresh(tag_obj)
+    return tag_obj
+
+
+@app.delete("/tags/{tag_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_tag(tag_id: int, db: Session = Depends(get_db)) -> None:
+    tag_obj = _get_or_404(db, Tag, tag_id, "Tag not found")
+    db.delete(tag_obj)
+    db.commit()
 
 
 if __name__ == "__main__":
