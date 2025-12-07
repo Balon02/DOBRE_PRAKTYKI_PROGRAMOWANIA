@@ -12,13 +12,13 @@ def generate_task_ids(count: int) -> list[str]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Queue producer")
+    parser = argparse.ArgumentParser(description="Queue producer (SQLite)")
     parser.add_argument("--count", type=int, default=1, help="How many tasks to enqueue")
     parser.add_argument(
         "--queue",
         type=Path,
         default=Path(__file__).resolve().parent / QUEUE_FILENAME,
-        help="Path to queue CSV file",
+        help="Path to SQLite queue file",
     )
     args = parser.parse_args()
 

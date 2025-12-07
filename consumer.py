@@ -32,12 +32,12 @@ def consume(queue_path: Path, consumer_id: str, processing_seconds: int, poll_se
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Queue consumer")
+    parser = argparse.ArgumentParser(description="Queue consumer (SQLite)")
     parser.add_argument(
         "--queue",
         type=Path,
         default=Path(__file__).resolve().parent / QUEUE_FILENAME,
-        help="Path to queue CSV file",
+        help="Path to SQLite queue file",
     )
     parser.add_argument(
         "--processing-seconds",

@@ -4,14 +4,14 @@ import subprocess
 import sys
 from pathlib import Path
 
-QUEUE_PATH = Path(__file__).resolve().parent / "queue.csv"
+QUEUE_PATH = Path(__file__).resolve().parent / "queue.sqlite"
 
 
 def main() -> None:
     base_cmd = [sys.executable]
 
     # Seed 100 tasks
-    print("Seeding 100 tasks...")
+    print("Seeding 100 tasks into SQLite queue...")
     subprocess.run(base_cmd + ["producer.py", "--count", "100", "--queue", str(QUEUE_PATH)], check=True)
 
     # Launch 4 consumers in the foreground with exit_when_empty to finish once the queue is drained.
