@@ -2,6 +2,7 @@ import os
 import gdown
 
 os.environ['KERAS_BACKEND'] = 'jax'
+os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
 
 import keras
 from keras import ops
@@ -39,13 +40,14 @@ class InferencePipeline:
 
         self._build_yolo()
         self._yolo.trainable=False
-        self._yolo.compile()
+        self._yolo.compile(jit_compile=True)
         self._yolo(ops.zeros((batch, 1024, 1024, 3), dtype='float16'))
 
         self._plate_cfg = load_plate_config_from_yaml('plate_config.yaml')
         self._ocr = load_keras_model('ocr.keras', self._plate_cfg)
         self._ocr.trainable=False
-        self._ocr.compile()
+        self._ocr.compile(jit_compile=True)
+        self._ocr(ops.zeros((batch, 70, 140, 1), dtype='float16'))
 
     def _build_yolo(self):
         base = YoloV11(depth=0.5, width=0.25, max_channels=1024, num_classes=1, input_res=1024, add_downsample=False)
