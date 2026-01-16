@@ -2,6 +2,7 @@
 import argparse
 import os
 import time
+import warnings
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from pathlib import Path
@@ -10,7 +11,11 @@ import xml.etree.ElementTree as ET
 import cv2
 import numpy as np
 
+from grade import calculate_final_grade
 from inference import InferencePipeline
+
+warnings.filterwarnings("ignore")
+np.seterr(all="ignore")
 
 
 def parse_args():
@@ -198,7 +203,7 @@ def main():
     if num_workers > 1:
         executor = ThreadPoolExecutor(max_workers=num_workers)
     try:
-        evaluate_split(
+        train_acc = evaluate_split(
             "train",
             pipeline,
             train_items,
@@ -206,8 +211,8 @@ def main():
             executor,
             num_workers,
         )
-        evaluate_split(
-            "test",
+        val_acc = evaluate_split(
+            "val",
             pipeline,
             val_items,
             args.batch_size,
@@ -228,6 +233,10 @@ def main():
             f"Speed: {per_100:.4f}s per 100 images "
             f"({img_per_sec:.2f} img/s, {sample_count} samples)"
         )
+        train_grade = calculate_final_grade(train_acc * 100.0, per_100)
+        val_grade = calculate_final_grade(val_acc * 100.0, per_100)
+        print(f"Train grade: {train_grade:.1f}")
+        print(f"Val grade: {val_grade:.1f}")
     finally:
         if executor is not None:
             executor.shutdown(wait=True)
