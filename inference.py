@@ -31,11 +31,11 @@ class InferencePipeline:
         if batch < 1:
             raise ValueError("batch must be >= 1")
         self._batch = batch
-        # if not os.path.exists('yolo.h5'):
-        #     gdown.download(YOLO_WEIGHTS, 'yolo.h5', quiet=False, fuzzy=True, verify=False)
-        # 
-        # if not os.path.exists('ocr.keras'):
-        #     gdown.download(EASY_PLATE_OCR_WEIGHTS, 'ocr.keras', quiet=False, fuzzy=True, verify=False)
+        if not os.path.exists('yolo.h5'):
+            gdown.download(YOLO_WEIGHTS, 'yolo.h5', quiet=False, fuzzy=True, verify=False)
+        
+        if not os.path.exists('ocr.keras'):
+            gdown.download(EASY_PLATE_OCR_WEIGHTS, 'ocr.keras', quiet=False, fuzzy=True, verify=False)
 
         self._build_yolo()
         self._yolo.trainable=False
