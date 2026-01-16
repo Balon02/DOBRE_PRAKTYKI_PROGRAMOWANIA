@@ -76,3 +76,44 @@ class YoloDetectionHead(layers.Layer):
         config.update({"input_res": self.input_res, "strides": self.strides, "num_classes": self.num_classes})
         return config
 
+class YoloClassificationHead(layers.Layer):
+    """Classification head mirroring Ultralytics' Classify module.
+
+    Applies a 1x1 conv to limit channels, global average pooling, optional
+    dropout, then a dense layer to produce class logits. Accepts either a
+    single feature map or a list/tuple (uses the last one, matching YOLO cls).
+    """
+
+    def __init__(self, num_classes: int = 1000, dropout_rate: float = 0.0, **kwargs):
+        super().__init__(**kwargs)
+        self.num_classes = num_classes
+        self.dropout_rate = dropout_rate
+
+    def build(self, input_shape):
+        # Handle lists/tuples of feature maps by looking at the last element's shape.
+        if isinstance(input_shape, (list, tuple)):
+            shape = input_shape[-1]
+        else:
+            shape = input_shape
+
+        c1 = shape[-1]
+        c_hidden = min(int(c1), 1024)
+
+        self.conv = YoloConv2D(filters=c_hidden, kernel_size=1)
+        self.pool = layers.GlobalAveragePooling2D()
+        self.drop = layers.Dropout(self.dropout_rate)
+        self.fc = layers.Dense(self.num_classes)
+        super().build(input_shape)
+
+    def call(self, inputs, training=None):
+        x = inputs[-1] if isinstance(inputs, (list, tuple)) else inputs
+        x = self.conv(x, training=training)
+        x = self.pool(x)
+        if self.dropout_rate > 0.0:
+            x = self.drop(x, training=training)
+        return self.fc(x)
+
+    def get_config(self):
+        config = super().get_config()
+        config.update({"num_classes": self.num_classes, "dropout_rate": self.dropout_rate})
+        return config
