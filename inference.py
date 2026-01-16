@@ -28,6 +28,9 @@ keras.mixed_precision.set_global_policy("mixed_float16")
 
 class InferencePipeline:
     def __init__(self, batch=1):
+        if batch < 1:
+            raise ValueError("batch must be >= 1")
+        self._batch = batch
         if not os.path.exists('yolo.h5'):
             gdown.download(YOLO_WEIGHTS, 'yolo.h5', quiet=False, fuzzy=True)
         
@@ -50,6 +53,10 @@ class InferencePipeline:
 
     @jax.jit
     def _ocr_forward(self, x): return self._ocr(x, training=False)
+
+    @property
+    def batch_size(self) -> int:
+        return self._batch
 
     def _prepare_ocr_image(self, crop_bgr: np.ndarray) -> np.ndarray | None:
         if crop_bgr is None or crop_bgr.size == 0:
@@ -86,6 +93,7 @@ class InferencePipeline:
         )
 
     def infer(self, images):
+        # INPUT IMAGE IS ASSUMED TO BE BGR; RAW FROM OPENCV JPEG DECODE
         if isinstance(images, np.ndarray):
             if images.ndim == 3:
                 imgs = [images]
@@ -102,6 +110,9 @@ class InferencePipeline:
         if not imgs:
             return None
 
+        if len(imgs) > self._batch:
+            raise ValueError(f"Received {len(imgs)} images but batch is {self._batch}; caller should chunk requests.")
+
         yolo_inputs = []
         orig_sizes = []
         for img in imgs:
@@ -113,6 +124,16 @@ class InferencePipeline:
             yolo_inputs.append(rgb.astype("float16") / 255.0)
             orig_sizes.append((orig_h, orig_w))
 
+        # Pad to fixed batch to keep JAX-compiled shapes stable.
+        if len(yolo_inputs) < self._batch:
+            pad_needed = self._batch - len(yolo_inputs)
+            for _ in range(pad_needed):
+                zero_img = np.zeros(
+                    (self._yolo_input_res, self._yolo_input_res, 3), dtype="float16"
+                )
+                yolo_inputs.append(zero_img)
+                orig_sizes.append((self._yolo_input_res, self._yolo_input_res))
+
         yolo_batch = np.stack(yolo_inputs, axis=0)
         preds = np.array(self._yolo_forward(yolo_batch))
 
@@ -120,6 +141,8 @@ class InferencePipeline:
         crops = []
         crop_indices = []
         for i, pred in enumerate(preds):
+            if i >= len(imgs):
+                break  # ignore padded items
             confs = pred[:, 4]
             if not np.any(confs > 0):
                 continue
