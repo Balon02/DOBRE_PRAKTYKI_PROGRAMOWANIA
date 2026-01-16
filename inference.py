@@ -21,7 +21,7 @@ from fast_plate_ocr.core.process import (
 )
 
 
-YOLO_WEIGHTS = 'https://drive.google.com/file/d/16RPtgDg3Y_Ql-FAu3bCZ4VnqiNuCkr74/view?usp=drive_link'
+YOLO_WEIGHTS = 'https://drive.google.com/file/d/1hX2KY7NkETFJitoSukyFRNSFe-A-oIQT/view?usp=drive_link'
 EASY_PLATE_OCR_WEIGHTS = 'https://drive.google.com/file/d/19e_7ch1VCeB3iY2M8uNNpxdErz6Ieo1J/view?usp=drive_link'
 
 keras.mixed_precision.set_global_policy("mixed_float16")
@@ -55,15 +55,10 @@ class InferencePipeline:
 
     def _yolo_forward(self, x):
         model = self._yolo
-        @jax.jit
-        def inner(x): return model(x, training=False)
-        return inner(x)
+        def inner(x): return model(x,)
 
-    def _ocr_forward(self, x):
-        model = self._ocr
-        @jax.jit
-        def inner(x): return model(x, training=False)
-        return inner(x)
+    def _ocr_forward(self, x): 
+        return self._ocr(x, training=False)
 
     @property
     def batch_size(self) -> int:
@@ -94,7 +89,7 @@ class InferencePipeline:
                 ocr_imgs.append(img)
         if not ocr_imgs:
             return None
-        batch = ops.array(preprocess_image(np.stack(ocr_imgs, axis=0)))
+        batch = preprocess_image(np.stack(ocr_imgs, axis=0))
         y = np.array(self._ocr_forward(batch))
         return postprocess_output(
             model_output=y,
@@ -145,7 +140,7 @@ class InferencePipeline:
                 yolo_inputs.append(zero_img)
                 orig_sizes.append((1024, 1024))
 
-        yolo_batch = ops.array(np.stack(yolo_inputs, axis=0))
+        yolo_batch = np.stack(yolo_inputs, axis=0)
         preds = np.array(self._yolo_forward(yolo_batch))
 
         results = [None] * len(imgs)
