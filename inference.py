@@ -17,7 +17,7 @@ from fast_plate_ocr.train.utilities.utils import load_keras_model
 from fast_plate_ocr.core.process import (
     preprocess_image,
     postprocess_output,
-    read_and_resize_plate_image,
+    resize_image,
 )
 
 
@@ -35,10 +35,11 @@ class InferencePipeline:
             gdown.download(EASY_PLATE_OCR_WEIGHTS, 'ocr.keras', quiet=False, fuzzy=True)
 
         base = YoloV11(depth=0.5, width=0.25, max_channels=1024, num_classes=1, input_res=1024, add_downsample=False)
+        self._yolo_input_res = base.input_res
         self._yolo = YoloV11Inference(base_model=base, num_classes=1, strides=(8, 16, 32), conf_thres=0.25,)
         self._yolo.load_weights('yolo.h5')
         self._yolo.trainable=False
-        self._yolo(ops.zeros((batch, 1024, 1024, 3), dtype='float16'))
+        self._yolo(ops.zeros((batch, self._yolo_input_res, self._yolo_input_res, 3), dtype='float16'))
 
         self._plate_cfg = load_plate_config_from_yaml('plate_config.yaml')
         self._ocr = load_keras_model('ocr.keras', self._plate_cfg)
@@ -49,3 +50,108 @@ class InferencePipeline:
 
     @jax.jit
     def _ocr_forward(self, x): return self._ocr(x, training=False)
+
+    def _prepare_ocr_image(self, crop_bgr: np.ndarray) -> np.ndarray | None:
+        if crop_bgr is None or crop_bgr.size == 0:
+            return None
+        if self._plate_cfg.image_color_mode == "grayscale":
+            img = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2GRAY)
+        else:
+            img = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2RGB)
+        return resize_image(
+            img,
+            img_height=self._plate_cfg.img_height,
+            img_width=self._plate_cfg.img_width,
+            image_color_mode=self._plate_cfg.image_color_mode,
+            keep_aspect_ratio=self._plate_cfg.keep_aspect_ratio,
+            interpolation_method=self._plate_cfg.interpolation,
+            padding_color=self._plate_cfg.padding_color,
+        )
+
+    def _ocr_infer(self, crops: list[np.ndarray]) -> list[str] | None:
+        ocr_imgs = []
+        for crop in crops:
+            img = self._prepare_ocr_image(crop)
+            if img is not None:
+                ocr_imgs.append(img)
+        if not ocr_imgs:
+            return None
+        batch = preprocess_image(np.stack(ocr_imgs, axis=0))
+        y = np.array(self._ocr_forward(batch))
+        return postprocess_output(
+            model_output=y,
+            max_plate_slots=self._plate_cfg.max_plate_slots,
+            model_alphabet=self._plate_cfg.alphabet,
+            return_confidence=False,
+        )
+
+    def infer(self, images):
+        if isinstance(images, np.ndarray):
+            if images.ndim == 3:
+                imgs = [images]
+                single = True
+            elif images.ndim == 4:
+                imgs = [images[i] for i in range(images.shape[0])]
+                single = False
+            else:
+                return None
+        else:
+            imgs = list(images)
+            single = False
+
+        if not imgs:
+            return None
+
+        yolo_inputs = []
+        orig_sizes = []
+        for img in imgs:
+            if not isinstance(img, np.ndarray) or img.ndim != 3 or img.shape[2] != 3:
+                return None
+            orig_h, orig_w = img.shape[:2]
+            resized = cv2.resize(img, (self._yolo_input_res, self._yolo_input_res))
+            rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
+            yolo_inputs.append(rgb.astype("float16") / 255.0)
+            orig_sizes.append((orig_h, orig_w))
+
+        yolo_batch = np.stack(yolo_inputs, axis=0)
+        preds = np.array(self._yolo_forward(yolo_batch))
+
+        results = [None] * len(imgs)
+        crops = []
+        crop_indices = []
+        for i, pred in enumerate(preds):
+            confs = pred[:, 4]
+            if not np.any(confs > 0):
+                continue
+            best_idx = int(np.argmax(confs))
+            x1, y1, x2, y2, _, _ = pred[best_idx]
+            orig_h, orig_w = orig_sizes[i]
+            x_scale = orig_w / float(self._yolo_input_res)
+            y_scale = orig_h / float(self._yolo_input_res)
+            x1 = int(max(0, min(orig_w - 1, x1 * x_scale)))
+            x2 = int(max(0, min(orig_w, x2 * x_scale)))
+            y1 = int(max(0, min(orig_h - 1, y1 * y_scale)))
+            y2 = int(max(0, min(orig_h, y2 * y_scale)))
+            if x2 <= x1 or y2 <= y1:
+                continue
+            crop = imgs[i][y1:y2, x1:x2]
+            if crop.size == 0:
+                continue
+            crops.append(crop)
+            crop_indices.append(i)
+
+        if not crops:
+            return None
+
+        plates = self._ocr_infer(crops)
+        if not plates:
+            return None
+
+        for i, plate in enumerate(plates):
+            cleaned = plate.replace("_", "")
+            if cleaned:
+                results[crop_indices[i]] = cleaned
+
+        if single:
+            return results[0]
+        return results
