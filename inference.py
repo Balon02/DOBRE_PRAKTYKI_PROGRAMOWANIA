@@ -32,10 +32,10 @@ class InferencePipeline:
             raise ValueError("batch must be >= 1")
         self._batch = batch
         if not os.path.exists('yolo.h5'):
-            gdown.download(YOLO_WEIGHTS, 'yolo.h5', quiet=False, fuzzy=True)
+            gdown.download(YOLO_WEIGHTS, 'yolo.h5', quiet=False, fuzzy=True, verify=False)
         
         if not os.path.exists('ocr.keras'):
-            gdown.download(EASY_PLATE_OCR_WEIGHTS, 'ocr.keras', quiet=False, fuzzy=True)
+            gdown.download(EASY_PLATE_OCR_WEIGHTS, 'ocr.keras', quiet=False, fuzzy=True, verify=False)
 
         base = YoloV11(depth=0.5, width=0.25, max_channels=1024, num_classes=1, input_res=1024, add_downsample=False)
         self._yolo_input_res = base.input_res

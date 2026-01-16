@@ -3,4 +3,4 @@
 !*.py
 !*.gitignore
 !*.envstate.txt
-!*ocr_config.yaml
+!*plate_config.yaml
