@@ -90,14 +90,20 @@ class InferencePipeline:
                 ocr_imgs.append(img)
         if not ocr_imgs:
             return None
+        valid_count = len(ocr_imgs)
+        if valid_count < self._batch:
+            pad_img = np.zeros_like(ocr_imgs[0])
+            for _ in range(self._batch - valid_count):
+                ocr_imgs.append(pad_img)
         batch = preprocess_image(np.stack(ocr_imgs, axis=0))
         y = np.array(self._ocr_forward(batch))
-        return postprocess_output(
+        results = postprocess_output(
             model_output=y,
             max_plate_slots=self._plate_cfg.max_plate_slots,
             model_alphabet=self._plate_cfg.alphabet,
             return_confidence=False,
         )
+        return results[:valid_count]
 
     def infer(self, images):
         # INPUT IMAGE IS ASSUMED TO BE BGR; RAW FROM OPENCV JPEG DECODE
