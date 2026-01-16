@@ -2,6 +2,7 @@
 import argparse
 import os
 import time
+from datetime import datetime
 import warnings
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
@@ -145,6 +146,7 @@ def evaluate_split(
     total = 0
     correct = 0
     skipped = 0
+    misses: list[str] = []
 
     for batch in _batched(items, batch_size):
         paths, labels = zip(*batch)
@@ -152,7 +154,7 @@ def evaluate_split(
         preds = pipeline.infer(images)
         if preds is None:
             preds = [None] * len(images)
-        for gt, pred in zip(labels, preds):
+        for path, gt, pred in zip(paths, labels, preds):
             gt_norm = _normalize_plate(gt)
             pred_norm = _normalize_plate(pred)
             if not gt_norm:
@@ -161,11 +163,16 @@ def evaluate_split(
             total += 1
             if pred_norm == gt_norm:
                 correct += 1
+            else:
+                misses.append(path.name)
 
     acc = (correct / total) if total else 0.0
     print(
         f"{name} accuracy: {acc:.4f} ({correct}/{total}), skipped: {skipped}"
     )
+    if misses:
+        print(f"{name} misses ({len(misses)}):")
+        print("\n".join(misses))
     return acc
 
 
@@ -183,12 +190,25 @@ def measure_speed(
 
 def main():
     args = parse_args()
+    last_ts = time.monotonic()
+
+    def log(message: str):
+        nonlocal last_ts
+        now = time.monotonic()
+        delta = now - last_ts
+        last_ts = now
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        print(f"[{ts}] (+{delta:.2f}s) {message}")
+
+    log("Loading annotations...")
     entries = load_entries(args.annot_file)
 
+    log("Recreating train/val split...")
     train_idx, val_idx = make_split(len(entries), args.val_split, args.seed)
     train_items = [(args.img_root / entries[i][0], entries[i][1]) for i in train_idx]
     val_items = [(args.img_root / entries[i][0], entries[i][1]) for i in val_idx]
 
+    log("Checking image files exist...")
     missing = [p for p, _ in (train_items + val_items) if not p.exists()]
     if missing:
         raise FileNotFoundError(f"Missing images (first 5): {missing[:5]}")
@@ -197,12 +217,14 @@ def main():
     if num_workers <= 0:
         num_workers = os.cpu_count() or 1
 
+    log("Initializing inference pipeline...")
     pipeline = InferencePipeline(batch=args.batch_size)
 
     executor = None
     if num_workers > 1:
         executor = ThreadPoolExecutor(max_workers=num_workers)
     try:
+        log("Evaluating train split...")
         train_acc = evaluate_split(
             "train",
             pipeline,
@@ -211,6 +233,7 @@ def main():
             executor,
             num_workers,
         )
+        log("Evaluating val split...")
         val_acc = evaluate_split(
             "val",
             pipeline,
@@ -220,12 +243,14 @@ def main():
             num_workers,
         )
 
+        log("Sampling 100 images for speed test...")
         rng = np.random.default_rng(args.seed)
         sample_count = min(100, len(entries))
         sample_idx = rng.choice(len(entries), size=sample_count, replace=False)
         sample_paths = [args.img_root / entries[i][0] for i in sample_idx]
         sample_images = load_images_cv2(sample_paths, executor, num_workers)
 
+        log("Measuring inference speed...")
         elapsed = measure_speed(pipeline, sample_images, args.batch_size)
         per_100 = elapsed * (100.0 / sample_count) if sample_count else 0.0
         img_per_sec = (sample_count / elapsed) if elapsed > 0 else 0.0
@@ -233,6 +258,7 @@ def main():
             f"Speed: {per_100:.4f}s per 100 images "
             f"({img_per_sec:.2f} img/s, {sample_count} samples)"
         )
+        log("Calculating grades...")
         train_grade = calculate_final_grade(train_acc * 100.0, per_100)
         val_grade = calculate_final_grade(val_acc * 100.0, per_100)
         print(f"Train grade: {train_grade:.1f}")
