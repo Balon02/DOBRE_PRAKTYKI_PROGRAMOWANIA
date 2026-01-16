@@ -122,7 +122,7 @@ class InferencePipeline:
             if not isinstance(img, np.ndarray) or img.ndim != 3 or img.shape[2] != 3:
                 return None
             orig_h, orig_w = img.shape[:2]
-            resized = cv2.resize(img, (self._yolo_input_res, self._yolo_input_res))
+            resized = cv2.resize(img, (1024, 1024))
             rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
             yolo_inputs.append(rgb.astype("float16") / 255.0)
             orig_sizes.append((orig_h, orig_w))
@@ -132,10 +132,10 @@ class InferencePipeline:
             pad_needed = self._batch - len(yolo_inputs)
             for _ in range(pad_needed):
                 zero_img = np.zeros(
-                    (self._yolo_input_res, self._yolo_input_res, 3), dtype="float16"
+                    (1024, 1024, 3), dtype="float16"
                 )
                 yolo_inputs.append(zero_img)
-                orig_sizes.append((self._yolo_input_res, self._yolo_input_res))
+                orig_sizes.append((1024, 1024))
 
         yolo_batch = np.stack(yolo_inputs, axis=0)
         preds = np.array(self._yolo_forward(yolo_batch))
@@ -152,8 +152,8 @@ class InferencePipeline:
             best_idx = int(np.argmax(confs))
             x1, y1, x2, y2, _, _ = pred[best_idx]
             orig_h, orig_w = orig_sizes[i]
-            x_scale = orig_w / float(self._yolo_input_res)
-            y_scale = orig_h / float(self._yolo_input_res)
+            x_scale = orig_w / float(1024)
+            y_scale = orig_h / float(1024)
             x1 = int(max(0, min(orig_w - 1, x1 * x_scale)))
             x2 = int(max(0, min(orig_w, x2 * x_scale)))
             y1 = int(max(0, min(orig_h - 1, y1 * y_scale)))
