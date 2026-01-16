@@ -34,6 +34,40 @@ class YoloV11Inference(keras.Model):
         self.max_nms = max_nms
         self.max_wh = max_wh
 
+    def get_config(self):
+        config = super().get_config()
+        config.update(
+            {
+                "num_classes": self.num_classes,
+                "strides": list(self.strides),
+                "reg_max": self.reg_max,
+                "conf_thres": self.conf_thres,
+                "iou_thres": self.iou_thres,
+                "max_det": self.max_det,
+                "max_nms": self.max_nms,
+                "max_wh": self.max_wh,
+                "base_model_config": self.base_model.get_config() if hasattr(self.base_model, "get_config") else None,
+                "base_model_class": self.base_model.__class__.__name__,
+            }
+        )
+        return config
+
+    @classmethod
+    def from_config(cls, config):
+        base_model_config = config.pop("base_model_config", None)
+        base_model_class = config.pop("base_model_class", "YoloV11")
+        strides = config.get("strides", (8, 16, 32))
+        if isinstance(strides, list):
+            config["strides"] = tuple(strides)
+        base_model = None
+        if base_model_class == "YoloV11" and base_model_config is not None:
+            base_model = YoloV11.from_config(base_model_config)
+        elif base_model_config is not None:
+            base_model = YoloV11.from_config(base_model_config)
+        else:
+            base_model = YoloV11(num_classes=config.get("num_classes", 1), input_res=640)
+        return cls(base_model=base_model, **config)
+
     @staticmethod
     def _xywh_to_xyxy(box_xywh):
         x, y, w, h = ops.split(box_xywh, 4, axis=-1)

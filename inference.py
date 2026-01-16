@@ -5,12 +5,14 @@ os.environ['KERAS_BACKEND'] = 'jax'
 
 import keras
 from keras import ops
+from keras.models import load_model
 import jax
 import numpy as np
 import cv2
-
 from yolov11.yolo import YoloV11
 from yolov11.infer_wrapper import YoloV11Inference
+from yolov11.block import YoloConv2D, C3k2, SPPF, C2PSA, DFL
+from yolov11.head import YoloDetectionHead
 
 from fast_plate_ocr.train.model.config import load_plate_config_from_yaml
 from fast_plate_ocr.train.utilities.utils import load_keras_model
@@ -31,16 +33,14 @@ class InferencePipeline:
         if batch < 1:
             raise ValueError("batch must be >= 1")
         self._batch = batch
-        if not os.path.exists('yolo.h5'):
-            gdown.download(YOLO_WEIGHTS, 'yolo.h5', quiet=False, fuzzy=True, verify=False)
-        
-        if not os.path.exists('ocr.keras'):
-            gdown.download(EASY_PLATE_OCR_WEIGHTS, 'ocr.keras', quiet=False, fuzzy=True, verify=False)
+        # if not os.path.exists('yolo.h5'):
+        #     gdown.download(YOLO_WEIGHTS, 'yolo.h5', quiet=False, fuzzy=True, verify=False)
+        # 
+        # if not os.path.exists('ocr.keras'):
+        #     gdown.download(EASY_PLATE_OCR_WEIGHTS, 'ocr.keras', quiet=False, fuzzy=True, verify=False)
 
-        base = YoloV11(depth=0.5, width=0.25, max_channels=1024, num_classes=1, input_res=1024, add_downsample=False)
-        self._yolo_input_res = base.input_res
-        self._yolo = YoloV11Inference(base_model=base, num_classes=1, strides=(8, 16, 32), conf_thres=0.25,)
-        self._yolo.load_weights('yolo.h5')
+        self._yolo = self._load_yolo_model()
+        self._yolo_input_res = getattr(self._yolo.base_model, "input_res", 1024)
         self._yolo.trainable=False
         self._yolo(ops.zeros((batch, self._yolo_input_res, self._yolo_input_res, 3), dtype='float16'))
 
@@ -48,10 +48,25 @@ class InferencePipeline:
         self._ocr = load_keras_model('ocr.keras', self._plate_cfg)
         self._ocr.trainable=False
 
-    @jax.jit
+    def _load_yolo_model(self):
+        model_path = os.environ.get("YOLO_WEIGHTS_PATH", "yolo.keras")
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"YOLO model file not found at {model_path}. Set YOLO_WEIGHTS_PATH.")
+        custom_objects = {
+            "YoloV11Inference": YoloV11Inference,
+            "YoloV11": YoloV11,
+            "YoloConv2D": YoloConv2D,
+            "C3k2": C3k2,
+            "SPPF": SPPF,
+            "C2PSA": C2PSA,
+            "YoloDetectionHead": YoloDetectionHead,
+            "DFL": DFL,
+        }
+        model = load_model(model_path, custom_objects=custom_objects, compile=False)
+        return model
+
     def _yolo_forward(self, x): return self._yolo(x, training=False)
 
-    @jax.jit
     def _ocr_forward(self, x): return self._ocr(x, training=False)
 
     @property
