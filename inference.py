@@ -31,8 +31,8 @@ class InferencePipeline:
         if batch < 1:
             raise ValueError("batch must be >= 1")
         self._batch = batch
-        if not os.path.exists('yolo.h5'):
-            gdown.download(YOLO_WEIGHTS, 'yolo.h5', quiet=False, fuzzy=True, verify=False)
+        if not os.path.exists('yolo.weights.h5'):
+            gdown.download(YOLO_WEIGHTS, 'yolo.weights.h5', quiet=False, fuzzy=True, verify=False)
         
         if not os.path.exists('ocr.keras'):
             gdown.download(EASY_PLATE_OCR_WEIGHTS, 'ocr.keras', quiet=False, fuzzy=True, verify=False)
@@ -53,12 +53,9 @@ class InferencePipeline:
         infer_model = YoloV11Inference(base_model=model.base_model, num_classes=1, strides=(8, 16, 32), conf_thres=0.25,)
         self._yolo = infer_model
 
-    def _yolo_forward(self, x):
-        model = self._yolo
-        def inner(x): return model(x,)
+    def _yolo_forward(self, x): return self._yolo(x, training=False)
 
-    def _ocr_forward(self, x): 
-        return self._ocr(x, training=False)
+    def _ocr_forward(self, x): return self._ocr(x, training=False)
 
     @property
     def batch_size(self) -> int:
